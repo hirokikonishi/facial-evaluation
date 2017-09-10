@@ -8,6 +8,7 @@ import com.amazonaws.services.s3.model.{ GetObjectRequest, ListBucketsRequest, S
 import com.amazonaws.services.s3.AmazonS3Client
 import spray.json.JsonParser
 import com.typesafe.config.ConfigFactory
+import java.nio.ByteBuffer
 
 import scala.collection.JavaConverters._
 
@@ -25,20 +26,20 @@ object Main extends App {
     s3.listObjects(bucketName).getObjectSummaries.asScala.map { r =>
       {
         val data = s3.getObject(bucketName, r.getKey)
-        val aaa = new com.amazonaws.services.rekognition.model.S3Object
-        aaa.withBucket(bucketName).withName(r.getKey)
-        val sourceImage = new Image()
-        sourceImage.setS3Object(aaa)
-        val compareReq = new CompareFacesRequest()
+        val s3ForRekognition = new com.amazonaws.services.rekognition.model.S3Object
+        s3ForRekognition.withBucket(bucketName).withName(r.getKey).withVersion(data.getObjectMetadata.getVersionId)
+        val sourceImage = new Image withS3Object s3ForRekognition
 
-        val targetImage = new Image()
-        targetImage.setS3Object(aaa)
+        val targetImage = new Image withS3Object s3ForRekognition
+
         println(r.getKey)
         println(sourceImage)
         println(targetImage)
 
+        val compareReq = new CompareFacesRequest()
         compareReq.setSourceImage(sourceImage)
         compareReq.setTargetImage(targetImage)
+        compareReq.setSimilarityThreshold(0.65f)
         println(compareReq)
 
         val req = rekognition.compareFaces(compareReq)
