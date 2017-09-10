@@ -1,2 +1,16 @@
 *.class
 *.log
+.idea/
+modules/facialevaluation/src/main/resources/application.conf
+modules/facialevaluation/target/.history
+modules/facialevaluation/target/resolution-cache/
+modules/facialevaluation/target/scala-2.11/classes/application.conf
+modules/facialevaluation/target/streams/
+project/project/target/config-classes/$36062b27b0b5fb8ba859.cache
+project/project/target/config-classes/$7234a534e39595e1577a.cache
+project/project/target/config-classes/$bda2ef0880fcf127bc56.cache
+project/target/config-classes/$d93442176631abb41fc4.cache
+project/target/resolution-cache/
+project/target/scala-2.10/
+project/target/streams/
+target/
