@@ -1,6 +1,6 @@
 import com.amazonaws.auth.profile.ProfileCredentialsProvider
 import com.amazonaws.services.rekognition.{ AmazonRekognition, AmazonRekognitionClient, AmazonRekognitionClientBuilder }
-import com.amazonaws.services.rekognition.model.{ CompareFacesMatch, CompareFacesRequest, CompareFacesResult, Image }
+import com.amazonaws.services.rekognition.model._
 import com.amazonaws.services.s3.model.{ GetObjectRequest, ListBucketsRequest, S3Object }
 import com.amazonaws.services.s3.AmazonS3Client
 import com.typesafe.config.ConfigFactory
@@ -15,6 +15,16 @@ object Main extends App {
   def getImage(bucket: String, key: String) = {
     val image = new Image()
     image.withS3Object(new com.amazonaws.services.rekognition.model.S3Object().withBucket(bucket).withName(key))
+  }
+
+  def callFaceScoring(source: Image, maxLabels: Int, minConfidence: Float, rekognition: AmazonRekognition): DetectLabelsResult = {
+    val detectLabelsRequest = new DetectLabelsRequest()
+    detectLabelsRequest
+      .withImage(source)
+      .withMaxLabels(maxLabels)
+      .withMinConfidence(minConfidence)
+
+    rekognition.detectLabels(detectLabelsRequest)
   }
 
   def callCompareFaces(source: Image, target: Image, similarityThreshould: Float, rekognition: AmazonRekognition): CompareFacesResult = {
@@ -38,17 +48,24 @@ object Main extends App {
     val bucketName = conf.getString("s3.bucket")
     s3.listObjects(bucketName).getObjectSummaries.asScala.map { r =>
       {
-        val sourceImage = getImage(bucketName, r.getKey)
-        val targetImage = getImage(bucketName, r.getKey)
-        val similarityThreshould = 70F
+        /* label request */
+        val labelSourceImage = getImage(bucketName, r.getKey)
+        val labelMaxLabels: Int = 10
+        val labelMinConfidence = 70F
+        //val labelRes = callFaceScoring(labelSourceImage, labelMaxLabels, labelMinConfidence, rekognition)
+        //labelRes.getLabels
 
-        val res = callCompareFaces(sourceImage, targetImage, similarityThreshould, rekognition)
-        println(res)
+        /* ---------------------------------------------------------------------- */
 
-        res.getFaceMatches match {
-          case c: CompareFacesMatch => println(c.getFace)
-          case x => println(s"x= ${x}")
-        }
+        /* compare request */
+        val compareSourceImage = getImage(bucketName, r.getKey)
+        val compareTargetImage = getImage(bucketName, r.getKey)
+        val compareSimilarityThreshould = 70F
+
+        //val compareRes = callCompareFaces(compareSourceImage, compareTargetImage, compareSimilarityThreshould, rekognition)
+        //compareRes.getFaceMatches
+
+        /* ---------------------------------------------------------------------- */
       }
     }
   }
