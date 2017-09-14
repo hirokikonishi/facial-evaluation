@@ -51,9 +51,15 @@ object Main extends App {
         /* label request */
         val labelSourceImage = getImage(bucketName, r.getKey)
         val labelMaxLabels: Int = 10
-        val labelMinConfidence = 70F
-        //val labelRes = callFaceScoring(labelSourceImage, labelMaxLabels, labelMinConfidence, rekognition)
-        //labelRes.getLabels
+        val labelMinConfidence = 80F
+        val labelRes = callFaceScoring(labelSourceImage, labelMaxLabels, labelMinConfidence, rekognition)
+        val labels = labelRes.getLabels
+        labels.asScala.toList.map { l =>
+          l.getName match {
+            case "Smile" => println(s"It's High Score   Smile Image: ${r.getKey}, LabelName: ${l.getName}, Score: ${l.getConfidence.toString}")
+            case _ => ()
+          }
+        }
 
         /* ---------------------------------------------------------------------- */
 
