@@ -5,12 +5,25 @@ import com.amazonaws.services.s3.model.{ GetObjectRequest, ListBucketsRequest, S
 import com.amazonaws.services.s3.AmazonS3Client
 import com.typesafe.config.ConfigFactory
 import com.amazonaws.regions.Regions
+import jp.co.bizreach.elasticsearch4s._
 
 import scala.collection.JavaConverters._
 
 class FacialEvaluation {
 }
 object Main extends App {
+
+  def createS3Client(profile: ProfileCredentialsProvider): AmazonS3Client = {
+    val s3 = new AmazonS3Client(profile)
+    s3.withRegion(Regions.US_WEST_2)
+    s3
+  }
+
+  def createRekognitionClient(profile: ProfileCredentialsProvider): AmazonRekognitionClient = {
+    val rekognition = new AmazonRekognitionClient(profile)
+    rekognition.withRegion(Regions.US_WEST_2)
+    rekognition
+  }
 
   def getImage(bucket: String, key: String) = {
     val image = new Image()
@@ -37,13 +50,26 @@ object Main extends App {
     rekognition.compareFaces(compareFacesRequest)
   }
 
-  def listS3(): Unit = {
+  case class SmileScore(imageName: String, score: String)
+
+  def insertByESClient(score: SmileScore) = {
+    // Call this method once before using ESClient
+    ESClient.init()
+    ESClient.using("http://localhost:9200") { client =>
+      //index / type
+      val config = "smile" / "score"
+      client.insert(config, score)
+    }
+    // Call this method before shutting down application
+    ESClient.shutdown()
+  }
+
+  def facialEvaliation(): Unit = {
     val conf = ConfigFactory.load
     val profile = new ProfileCredentialsProvider()
 
-    val s3 = new AmazonS3Client(profile)
-    val rekognition = new AmazonRekognitionClient(profile)
-    rekognition.withRegion(Regions.US_WEST_2)
+    val s3 = createS3Client(profile)
+    val rekognition = createRekognitionClient(profile)
 
     val bucketName = conf.getString("s3.bucket")
     s3.listObjects(bucketName).getObjectSummaries.asScala.map { r =>
@@ -56,7 +82,10 @@ object Main extends App {
         val labels = labelRes.getLabels
         labels.asScala.toList.map { l =>
           l.getName match {
-            case "Smile" => println(s"It's High Score   Smile Image: ${r.getKey}, LabelName: ${l.getName}, Score: ${l.getConfidence.toString}")
+            case "Smile" => {
+              println(s"It's High Score   Smile Image: ${r.getKey}, LabelName: ${l.getName}, Score: ${l.getConfidence.toString}")
+              insertByESClient(SmileScore(imageName = r.getKey, score = l.getConfidence.toString))
+            }
             case _ => ()
           }
         }
@@ -75,5 +104,5 @@ object Main extends App {
       }
     }
   }
-  listS3()
+  facialEvaliation()
 }

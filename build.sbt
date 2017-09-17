@@ -58,7 +58,8 @@ lazy val FacialEvaluation = (project in file("./modules/facialevaluation")).
       "com.amazonaws" % "aws-lambda-java-core" % "1.1.0",
       "com.amazonaws" % "aws-java-sdk-s3" % "1.11.184",
       "com.amazonaws" % "aws-java-sdk-rekognition" % "1.11.101",
-      "io.spray" %%  "spray-json" % "1.3.2"
+      "io.spray" %%  "spray-json" % "1.3.2",
+      "jp.co.bizreach" %% "elastic-scala-httpclient" % "3.1.0"
     ),
     awsLambdaHandler := "com.hirokikonishi.FacialEvaluation::handleRequest"
   )
