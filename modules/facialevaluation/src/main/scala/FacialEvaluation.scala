@@ -1,3 +1,6 @@
+import java.time.format.DateTimeFormatter
+import java.time.{ LocalDateTime, ZoneOffset, ZonedDateTime }
+
 import com.amazonaws.auth.profile.ProfileCredentialsProvider
 import com.amazonaws.services.rekognition.{ AmazonRekognition, AmazonRekognitionClient, AmazonRekognitionClientBuilder }
 import com.amazonaws.services.rekognition.model._
@@ -6,6 +9,7 @@ import com.amazonaws.services.s3.AmazonS3Client
 import com.typesafe.config.ConfigFactory
 import com.amazonaws.regions.Regions
 import jp.co.bizreach.elasticsearch4s._
+import org.codelibs.elasticsearch.common.rounding.DateTimeUnit
 
 import scala.collection.JavaConverters._
 
@@ -50,15 +54,15 @@ object Main extends App {
     rekognition.compareFaces(compareFacesRequest)
   }
 
-  case class SmileScore(imageName: String, score: String)
+  case class SmileScore(imageName: String, score: Float, dateTime: String)
 
-  def insertByESClient(score: SmileScore) = {
+  def insertByESClient(documentId: String, score: SmileScore) = {
     // Call this method once before using ESClient
     ESClient.init()
     ESClient.using("http://localhost:9200") { client =>
       //index / type
       val config = "smile" / "score"
-      client.insert(config, score)
+      client.insert(config, documentId, score)
     }
     // Call this method before shutting down application
     ESClient.shutdown()
@@ -84,11 +88,19 @@ object Main extends App {
           l.getName match {
             case "Smile" => {
               println(s"It's High Score   Smile Image: ${r.getKey}, LabelName: ${l.getName}, Score: ${l.getConfidence.toString}")
-              insertByESClient(SmileScore(imageName = r.getKey, score = l.getConfidence.toString))
+              insertByESClient(
+                documentId = r.getKey,
+                SmileScore(
+                  imageName = r.getKey,
+                  score = l.getConfidence,
+                  dateTime = ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"))
+                )
+              )
             }
             case _ => ()
           }
         }
+        println(s"labels: ${labels}")
 
         /* ---------------------------------------------------------------------- */
 
