@@ -30,7 +30,7 @@ val awsSettings = Seq(
   awsAccountId := accountId
 )
 
-val lambdaSettings = Seq(
+val lambdaSettings = awsSettings ++ Seq(
   awsLambdaFunctionName := s"${name.value}",
   awsLambdaDescription := "Facial deviation value evaluation using scala on aws of serverless.",
   awsLambdaRole := roleArn,
@@ -38,9 +38,11 @@ val lambdaSettings = Seq(
   awsLambdaMemorySize := 1536,
   awsLambdaS3Bucket := bucketName,
   awsLambdaDeployDescription := s"${version.value}",
+  eventSourceNames := Seq(""),
   awsLambdaAliasNames := Seq(
     "test", "production"
-  )
+  ),
+  addArtifact(artifact in (Compile, deploy), deploy)
 )
 
 lazy val root = (project in file(".")).
@@ -48,6 +50,7 @@ lazy val root = (project in file(".")).
   settings(commonSettings: _*)
 
 lazy val FacialEvaluation = (project in file("./modules/facialevaluation")).
+  enablePlugins(AWSLambdaTriggerKinesisStreamPlugin).
   settings(commonSettings: _*).
   settings(assemblySettings: _*).
   settings(lambdaSettings: _*).
