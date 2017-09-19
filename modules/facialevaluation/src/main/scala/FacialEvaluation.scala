@@ -98,37 +98,20 @@ object Main extends App {
     ESClient.shutdown()
   }
 
-  def facialEvaliation(): Unit = {
-    val conf = ConfigFactory.load
-    val profile = new ProfileCredentialsProvider()
-
-    val s3 = createS3Client(profile)
-    val rekognition = createRekognitionClient(profile)
-
-    val bucketName = conf.getString("s3.bucket")
-    s3.listObjects(bucketName).getObjectSummaries.asScala.map { r =>
-      {
-        /* label request */
-        //val labels = callFaceScoring(profile, labelSourceImage).getLabeles
-        //println(s"labels: ${labels}")
-
-        /* ---------------------------------------------------------------------- */
-
-        /* compare request */
-        //val compareSourceImage = getImage(bucketName, r.getKey)
-        //val compareTargetImage = getImage(bucketName, r.getKey)
-        //val compareSimilarityThreshould = 70F
-
-        //val compareRes = callCompareFaces(compareSourceImage, compareTargetImage, compareSimilarityThreshould, rekognition)
-        //compareRes.getFaceMatches
-
-        /* ---------------------------------------------------------------------- */
-      }
-    }
-  }
-
   val conf = ConfigFactory.load
   val profile = new ProfileCredentialsProvider()
+
+  /* compare request------------------------
+  val sourceImage = getImage("bucketName", "keyName")
+  for {
+    s3Object <- listS3(profile, conf)
+    compareTargetImage = getImage(conf.getString("s3.bucket"), s3Object.getKey)
+    compareRes = callCompareFaces(profile, sourceImage, compareTargetImage)
+    faceMatch <- compareRes
+    _ = println(s"It's high score!! imageName: ${s3Object.getKey}, similarity: ${faceMatch.getSimilarity}")
+  } yield ()
+
+  ----------------------------------------*/
 
   for {
     s3Object <- listS3(profile, conf)
