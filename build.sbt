@@ -64,5 +64,5 @@ lazy val FacialEvaluation = (project in file("./modules/facialevaluation")).
       "io.spray" %%  "spray-json" % "1.3.2",
       "jp.co.bizreach" %% "elastic-scala-httpclient" % "3.1.0"
     ),
-    awsLambdaHandler := "com.hirokikonishi.FacialEvaluation::handleRequest"
+    awsLambdaHandler := "App::hundler"
   )

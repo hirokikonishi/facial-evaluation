@@ -8,45 +8,32 @@ import com.amazonaws.services.s3.model._
 import com.amazonaws.services.s3.AmazonS3Client
 import com.typesafe.config.{ Config, ConfigFactory }
 import com.amazonaws.regions.Regions
+import com.amazonaws.services.lambda.runtime.Context
 import jp.co.bizreach.elasticsearch4s._
 import org.codelibs.elasticsearch.common.rounding.DateTimeUnit
-import collection.JavaConverters._
 
+import collection.JavaConverters._
 import scala.collection.JavaConverters._
 import scala.util.{ Failure, Success, Try }
 
 case class SystemError(cause: Option[Throwable])
 
-object SystemError {
-  def apply(): SystemError = new SystemError(None)
-  def apply(cause: Throwable): SystemError = new SystemError(Some(cause))
-}
+trait Base {
 
-class FacialEvaluation {
-}
-object Main extends App {
-
-  def createS3Client(profile: ProfileCredentialsProvider): AmazonS3Client = {
-    val s3 = new AmazonS3Client(profile)
+  def createS3Client: AmazonS3Client = {
+    val s3 = new AmazonS3Client()
     s3.withRegion(Regions.US_WEST_2)
     s3
   }
 
-  def createRekognitionClient(profile: ProfileCredentialsProvider): AmazonRekognitionClient = {
-    val rekognition = new AmazonRekognitionClient(profile)
+  def createRekognitionClient: AmazonRekognitionClient = {
+    val rekognition = new AmazonRekognitionClient
     rekognition.withRegion(Regions.US_WEST_2)
     rekognition
   }
 
-  def try2either[A](f: => Try[A]): Either[SystemError, A] = {
-    f match {
-      case Success(s) => Right(s)
-      case Failure(e) => Left(SystemError(e))
-    }
-  }
-
-  def listS3(profile: ProfileCredentialsProvider, conf: Config): List[S3ObjectSummary] = {
-    val s3 = createS3Client(profile)
+  def listS3(conf: Config): List[S3ObjectSummary] = {
+    val s3 = createS3Client
     val bucketName = conf.getString("s3.bucket")
 
     s3.listObjects(bucketName).getObjectSummaries.asScala.toList
@@ -57,10 +44,10 @@ object Main extends App {
     image.withS3Object(new com.amazonaws.services.rekognition.model.S3Object().withBucket(bucket).withName(key))
   }
 
-  def callFaceScoring(profile: ProfileCredentialsProvider, source: Image): List[Label] = {
+  def callFaceScoring(source: Image): List[Label] = {
     val maxLabels: Int = 10
     val minConfidence = 80F
-    val rekognition = createRekognitionClient(profile)
+    val rekognition = createRekognitionClient
 
     val detectLabelsRequest = new DetectLabelsRequest()
     detectLabelsRequest
@@ -71,9 +58,9 @@ object Main extends App {
     rekognition.detectLabels(detectLabelsRequest).getLabels.asScala.toList
   }
 
-  def callCompareFaces(profile: ProfileCredentialsProvider, source: Image, target: Image): List[CompareFacesMatch] = {
+  def callCompareFaces(source: Image, target: Image): List[CompareFacesMatch] = {
     val similarityThreshould = 70F
-    val rekognition = createRekognitionClient(profile)
+    val rekognition = createRekognitionClient
 
     val compareFacesRequest = new CompareFacesRequest()
     compareFacesRequest
@@ -89,7 +76,7 @@ object Main extends App {
   def insertByESClient(documentId: String, score: SmileScore) = {
     // Call this method once before using ESClient
     ESClient.init()
-    ESClient.using("http://localhost:9200") { client =>
+    ESClient.using("http://es_endpoint") { client =>
       //index / type
       val config = "smile" / "score"
       client.insert(config, documentId, score)
@@ -99,7 +86,6 @@ object Main extends App {
   }
 
   val conf = ConfigFactory.load
-  val profile = new ProfileCredentialsProvider()
 
   /* compare request------------------------
   val sourceImage = getImage("bucketName", "keyName")
@@ -113,23 +99,27 @@ object Main extends App {
 
   ----------------------------------------*/
 
-  for {
-    s3Object <- listS3(profile, conf)
-    labelSourceImage = getImage(conf.getString("s3.bucket"), s3Object.getKey)
-    label <- callFaceScoring(profile, labelSourceImage)
-    _ = label.getName match {
-      case "Smile" => {
-        println(s"It's High Score   Smile Image: ${s3Object.getKey}, LabelName: ${label.getName}, Score: ${label.getConfidence.toString}")
-        insertByESClient(
-          documentId = s3Object.getKey,
-          SmileScore(
-            imageName = s3Object.getKey,
-            score = label.getConfidence,
-            dateTime = ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"))
+  def hundler(input: Any, context: Context) = {
+    for {
+      s3Object <- listS3(conf)
+      labelSourceImage = getImage(conf.getString("s3.bucket"), s3Object.getKey)
+      label <- callFaceScoring(labelSourceImage)
+      _ = label.getName match {
+        case "Smile" => {
+          println(s"It's High Score   Smile Image: ${s3Object.getKey}, LabelName: ${label.getName}, Score: ${label.getConfidence.toString}")
+          insertByESClient(
+            documentId = s3Object.getKey,
+            SmileScore(
+              imageName = s3Object.getKey,
+              score = label.getConfidence,
+              dateTime = ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"))
+            )
           )
-        )
+        }
+        case _ => ()
       }
-      case _ => ()
-    }
-  } yield ()
+    } yield ()
+  }
 }
+
+class App extends Base
