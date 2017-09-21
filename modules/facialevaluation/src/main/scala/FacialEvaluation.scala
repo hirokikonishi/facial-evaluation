@@ -22,13 +22,13 @@ trait Base {
 
   def createS3Client: AmazonS3Client = {
     val s3 = new AmazonS3Client()
-    s3.withRegion(Regions.US_WEST_2)
+    s3.withRegion(Regions.US_EAST_1)
     s3
   }
 
   def createRekognitionClient: AmazonRekognitionClient = {
     val rekognition = new AmazonRekognitionClient
-    rekognition.withRegion(Regions.US_WEST_2)
+    rekognition.withRegion(Regions.US_EAST_1)
     rekognition
   }
 
@@ -45,8 +45,8 @@ trait Base {
   }
 
   def callFaceScoring(source: Image): List[Label] = {
-    val maxLabels: Int = 10
-    val minConfidence = 80F
+    val maxLabels: Int = 20
+    val minConfidence = 10F
     val rekognition = createRekognitionClient
 
     val detectLabelsRequest = new DetectLabelsRequest()
@@ -58,8 +58,16 @@ trait Base {
     rekognition.detectLabels(detectLabelsRequest).getLabels.asScala.toList
   }
 
+  def callDetectFaces(source: Image) = {
+    val rekognition = createRekognitionClient
+
+    val detectFacesRequest = new DetectFacesRequest
+    detectFacesRequest.withImage(source).withAttributes("All/HAPPY")
+    rekognition.detectFaces(detectFacesRequest)
+  }
+
   def callCompareFaces(source: Image, target: Image): List[CompareFacesMatch] = {
-    val similarityThreshould = 70F
+    val similarityThreshould = 20F
     val rekognition = createRekognitionClient
 
     val compareFacesRequest = new CompareFacesRequest()
@@ -73,12 +81,10 @@ trait Base {
 
   case class SmileScore(imageName: String, score: Float, dateTime: String)
 
-  def insertByESClient(documentId: String, score: SmileScore) = {
+  def insertByESClient(config: ESConfig, documentId: String, score: SmileScore) = {
     // Call this method once before using ESClient
     ESClient.init()
-    ESClient.using("http://es_endpoint") { client =>
-      //index / type
-      val config = "smile" / "score"
+    ESClient.using("http://es.endpoint") { client =>
       client.insert(config, documentId, score)
     }
     // Call this method before shutting down application
@@ -100,14 +106,73 @@ trait Base {
   ----------------------------------------*/
 
   def hundler(input: Any, context: Context) = {
+
+    /* detectFaces */
+    for {
+      s3Object <- listS3(conf)
+      labelSourceImage = getImage(conf.getString("s3.bucket"), s3Object.getKey)
+      faceDetails = callDetectFaces(labelSourceImage)
+      faceDetail <- faceDetails.getFaceDetails.asScala.toList
+      emotion <- faceDetail.getEmotions.asScala.toList.toSeq
+      _ = println(s"It's High HAPPY Score!! Happy Image: ${s3Object.getKey}")
+      //index / type
+      config = "happy" / "score"
+      _ = println(s"It's detectFaces HAPPY Image: ${s3Object.getKey}, Score: ${emotion.getConfidence.toString}")
+      _ = insertByESClient(
+        config = config,
+        documentId = s3Object.getKey,
+        SmileScore(
+          imageName = s3Object.getKey,
+          score = emotion.getConfidence,
+          dateTime = ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"))
+        )
+      )
+    } yield ()
+
+    /* detectLabels*/
     for {
       s3Object <- listS3(conf)
       labelSourceImage = getImage(conf.getString("s3.bucket"), s3Object.getKey)
       label <- callFaceScoring(labelSourceImage)
+      faceDetails = callDetectFaces(labelSourceImage)
+      faceDetail <- faceDetails.getFaceDetails.asScala.toList
+      emotion <- faceDetail.getEmotions.asScala.toList
       _ = label.getName match {
+        // 笑顔度合い
         case "Smile" => {
-          println(s"It's High Score   Smile Image: ${s3Object.getKey}, LabelName: ${label.getName}, Score: ${label.getConfidence.toString}")
+          println(s"It's High Smile Score!! Smile Image: ${s3Object.getKey}, LabelName: ${label.getName}, Score: ${label.getConfidence.toString}")
+          //index / type
+          val config = "smile" / "score"
           insertByESClient(
+            config = config,
+            documentId = s3Object.getKey,
+            SmileScore(
+              imageName = s3Object.getKey,
+              score = label.getConfidence,
+              dateTime = ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"))
+            )
+          )
+        }
+        // 幸せ度合い
+        case "HAPPY" => {
+          println(s"It's High HAPPY Score!! HAPPY Image: ${s3Object.getKey}, LabelName: ${label.getName}, Score: ${label.getConfidence.toString}")
+          //index / type
+          val config = "happy" / "score"
+          insertByESClient(
+            config = config,
+            documentId = s3Object.getKey,
+            SmileScore(
+              imageName = s3Object.getKey,
+              score = label.getConfidence,
+              dateTime = ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"))
+            )
+          )
+        }
+        case "SAD" => {
+          println(s"IT's SAD Face.... SAD Image ${s3Object.getKey}, LableName: ${label.getName}, Score: ${label.getConfidence.toString}")
+          val config = "sad" / "score"
+          insertByESClient(
+            config = config,
             documentId = s3Object.getKey,
             SmileScore(
               imageName = s3Object.getKey,
