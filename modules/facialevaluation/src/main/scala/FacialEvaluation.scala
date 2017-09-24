@@ -1,50 +1,58 @@
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
-import java.time.{ LocalDateTime, ZoneOffset, ZonedDateTime }
 
-import com.amazonaws.auth.profile.ProfileCredentialsProvider
-import com.amazonaws.services.rekognition.{ AmazonRekognition, AmazonRekognitionClient, AmazonRekognitionClientBuilder }
-import com.amazonaws.services.rekognition.model._
-import com.amazonaws.services.s3.model._
-import com.amazonaws.services.s3.AmazonS3Client
-import com.typesafe.config.{ Config, ConfigFactory }
 import com.amazonaws.regions.Regions
 import com.amazonaws.services.lambda.runtime.Context
+import com.amazonaws.services.rekognition.AmazonRekognitionClient
+import com.amazonaws.services.rekognition.model._
+import com.amazonaws.services.s3.AmazonS3Client
+import com.amazonaws.services.s3.model._
+import com.typesafe.config.{ Config, ConfigFactory }
 import jp.co.bizreach.elasticsearch4s._
-import org.codelibs.elasticsearch.common.rounding.DateTimeUnit
 
-import collection.JavaConverters._
 import scala.collection.JavaConverters._
-import scala.util.{ Failure, Success, Try }
+import scala.util.Try
 
 case class SystemError(cause: Option[Throwable])
 
-trait Base {
+trait domain {
+  case class SmileScore(imageName: String, score: Float, dateTime: String)
+
+  def listS3(conf: Config): Try[List[S3ObjectSummary]]
+  def getImage(bucket: String, key: String): Try[Image]
+  def callDetectLabels(source: Image): Try[List[Label]]
+  def callDetectFaces(source: Image): Try[DetectFacesResult]
+  def callCompareFaces(source: Image, target: Image): Try[List[CompareFacesMatch]]
+  def insertByESClient(config: ESConfig, documentId: String, score: SmileScore): Try[Unit]
+}
+
+trait infrastruture extends domain {
 
   def createS3Client: AmazonS3Client = {
     val s3 = new AmazonS3Client()
-    s3.withRegion(Regions.US_EAST_1)
+    s3.withRegion(Regions.US_WEST_2)
     s3
   }
 
   def createRekognitionClient: AmazonRekognitionClient = {
     val rekognition = new AmazonRekognitionClient
-    rekognition.withRegion(Regions.US_EAST_1)
+    rekognition.withRegion(Regions.US_WEST_2)
     rekognition
   }
 
-  def listS3(conf: Config): List[S3ObjectSummary] = {
+  override def listS3(conf: Config): Try[List[S3ObjectSummary]] = Try {
     val s3 = createS3Client
     val bucketName = conf.getString("s3.bucket")
 
     s3.listObjects(bucketName).getObjectSummaries.asScala.toList
   }
 
-  def getImage(bucket: String, key: String) = {
+  override def getImage(bucket: String, key: String): Try[Image] = Try {
     val image = new Image()
     image.withS3Object(new com.amazonaws.services.rekognition.model.S3Object().withBucket(bucket).withName(key))
   }
 
-  def callFaceScoring(source: Image): List[Label] = {
+  override def callDetectLabels(source: Image): Try[List[Label]] = Try {
     val maxLabels: Int = 20
     val minConfidence = 10F
     val rekognition = createRekognitionClient
@@ -58,15 +66,15 @@ trait Base {
     rekognition.detectLabels(detectLabelsRequest).getLabels.asScala.toList
   }
 
-  def callDetectFaces(source: Image) = {
+  override def callDetectFaces(source: Image): Try[DetectFacesResult] = Try {
     val rekognition = createRekognitionClient
 
     val detectFacesRequest = new DetectFacesRequest
-    detectFacesRequest.withImage(source).withAttributes("All/HAPPY")
+    detectFacesRequest.withImage(source).withAttributes("All")
     rekognition.detectFaces(detectFacesRequest)
   }
 
-  def callCompareFaces(source: Image, target: Image): List[CompareFacesMatch] = {
+  override def callCompareFaces(source: Image, target: Image): Try[List[CompareFacesMatch]] = Try {
     val similarityThreshould = 20F
     val rekognition = createRekognitionClient
 
@@ -79,9 +87,7 @@ trait Base {
     rekognition.compareFaces(compareFacesRequest).getFaceMatches.asScala.toList
   }
 
-  case class SmileScore(imageName: String, score: Float, dateTime: String)
-
-  def insertByESClient(config: ESConfig, documentId: String, score: SmileScore) = {
+  override def insertByESClient(config: ESConfig, documentId: String, score: SmileScore): Try[Unit] = Try {
     // Call this method once before using ESClient
     ESClient.init()
     ESClient.using("http://es.endpoint") { client =>
@@ -90,6 +96,9 @@ trait Base {
     // Call this method before shutting down application
     ESClient.shutdown()
   }
+}
+
+trait Base extends domain with infrastruture {
 
   val conf = ConfigFactory.load
 
@@ -109,15 +118,18 @@ trait Base {
 
     /* detectFaces */
     for {
-      s3Object <- listS3(conf)
-      labelSourceImage = getImage(conf.getString("s3.bucket"), s3Object.getKey)
-      faceDetails = callDetectFaces(labelSourceImage)
-      faceDetail <- faceDetails.getFaceDetails.asScala.toList
-      emotion <- faceDetail.getEmotions.asScala.toList.toSeq
-      _ = println(s"It's High HAPPY Score!! Happy Image: ${s3Object.getKey}")
+      s3Objects <- listS3(conf)
+    } yield for {
+      s3Object <- s3Objects
+    } yield for {
+      labelSourceImage <- getImage(conf.getString("s3.bucket"), s3Object.getKey)
+      faceDetectDetails <- callDetectFaces(labelSourceImage)
+    } yield for {
+      faceDetail <- faceDetectDetails.getFaceDetails.asScala.toList
+      emotion <- faceDetail.getEmotions.asScala.toList
+      _ = println(s"It's High HAPPY Score!! Happy Image: ${s3Object.getKey}, emotion: ${emotion.toString}")
       //index / type
       config = "happy" / "score"
-      _ = println(s"It's detectFaces HAPPY Image: ${s3Object.getKey}, Score: ${emotion.getConfidence.toString}")
       _ = insertByESClient(
         config = config,
         documentId = s3Object.getKey,
@@ -131,12 +143,14 @@ trait Base {
 
     /* detectLabels*/
     for {
-      s3Object <- listS3(conf)
-      labelSourceImage = getImage(conf.getString("s3.bucket"), s3Object.getKey)
-      label <- callFaceScoring(labelSourceImage)
-      faceDetails = callDetectFaces(labelSourceImage)
-      faceDetail <- faceDetails.getFaceDetails.asScala.toList
-      emotion <- faceDetail.getEmotions.asScala.toList
+      s3Objects <- listS3(conf)
+    } yield for {
+      s3Object <- s3Objects
+    } yield for {
+      labelSourceImage <- getImage(conf.getString("s3.bucket"), s3Object.getKey)
+      labels <- callDetectLabels(labelSourceImage)
+    } yield for {
+      label <- labels
       _ = label.getName match {
         // 笑顔度合い
         case "Smile" => {
